@@ -15,6 +15,10 @@ Versioning: Semantic Versioning (https://semver.org/)
 - Domain validation is stricter: labels may not start or end with a hyphen, length limits are enforced, and IP addresses are rejected.
 - `version` and `help` no longer require root.
 
+### Documentation
+- README renewal section covers the 2027/2028 lifetime changes, revalidation on renewal, ARI, and certificate profiles.
+- Roadmap: dropped OCSP must-staple; added ACME profile selection and ARI-driven renewal to M3; recorded the wildcard → DNS-01 decision and related decisions in the meta design log.
+
 ### Fixed
 - Pip installs now symlink `/usr/bin/certbot` (as documented by Certbot), matching the path used by the renewal cron job.
 
