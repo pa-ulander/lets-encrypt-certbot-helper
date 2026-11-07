@@ -2,28 +2,19 @@
 
 # lecbh - Let's Encrypt Certbot Helper for Apache/Nginx on Ubuntu
 # https://github.com/pa-ulander/lecbh
-# Version: 1.1.0
+# Version: 1.2.0
 
 set -euo pipefail
 IFS=$'\n\t'
 LOCK_FILE="${LECBH_LOCK_FILE:-/var/run/lecbh.lock}"
+VERSION="1.2.0"
 JSON_MODE=false
 
-cleanup() {
-    local ec=$?
-    # Remove lock if owned by this PID
-    if [[ -f "$LOCK_FILE" ]] && grep -q "^PID=$$" "$LOCK_FILE" 2>/dev/null; then
-        rm -f "$LOCK_FILE" || true
-    fi
-    if [[ $ec -ne 0 ]]; then
-        echo "❌ Error at line $LINENO (exit $ec)" >&2
-    fi
-}
-
-trap cleanup EXIT ERR INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # -------------------- DEFAULT CONFIG (env overrides allowed) --------------------
-: "${DEFAULT_EMAIL:=admin@example.com}"
+: "${DEFAULT_EMAIL:=}"
 : "${DEFAULT_DOMAINS:=example.com}"
 : "${DEFAULT_SERVER:=apache}"
 : "${DEFAULT_INSTALL_METHOD:=snap}" # snap | pip
@@ -53,7 +44,7 @@ usage() {
 Usage: sudo ./lecbh.sh [OPTIONS]
 
 Options:
-    --dry-run                Use certbot --dry-run (no real certs)
+    --dry-run                Test issuance without installing a certificate
     --unattended             Non-interactive: use defaults or provided flags
     --verbose                Verbose logging
     --quiet                  Minimal output (overrides verbose)
@@ -62,7 +53,7 @@ Options:
     --pip                    Force pip install method
     --snap                   Force snap install method (default)
     --server=apache|nginx    Web server type (overrides DEFAULT_SERVER)
-    --email=ADDR             Email address (overrides DEFAULT_EMAIL)
+    --email=ADDR             Optional email address (overrides DEFAULT_EMAIL)
     --domains=a.com,b.com    Comma separated domain list
     --no-redirect            Do not force HTTP->HTTPS redirect
     --json                   Output machine-readable JSON summary (implies quiet except errors)
@@ -79,6 +70,10 @@ log() { if $VERBOSE && ! $QUIET; then echo "${COLOR_INFO} $*" >&2; fi; return 0;
 info() { if ! $QUIET; then echo "$*" >&2; fi; return 0; }
 warn() { echo "${COLOR_WARN} $*" >&2; return 0; }
 die() { echo "${COLOR_ERR} $*" >&2; exit 1; }
+
+json_quote() {
+    printf '"%s"' "$1"
+}
 
 parse_flags() {
     while [[ $# -gt 0 ]]; do
@@ -103,8 +98,16 @@ parse_flags() {
     done
 }
 
-validate_email() { [[ $1 =~ ^[^@]+@[^@]+\.[^@]+$ ]] || die "Invalid email: $1"; }
-validate_domain() { [[ $1 =~ ^([A-Za-z0-9*-]+\.)+[A-Za-z]{2,}$ ]] || die "Invalid domain: $1"; }
+validate_email() {
+    [[ $1 =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] ||
+        die "Invalid email: $1"
+}
+
+validate_domain() {
+    [[ $1 != *'*'* ]] || die "Wildcard domains require DNS-01 validation, which is not supported yet: $1"
+    [[ ${#1} -le 253 && $1 =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] ||
+        die "Invalid domain: $1"
+}
 
 resolve_domain() {
     local d=$1
@@ -157,18 +160,7 @@ install_certbot() {
                             ln -sf /snap/bin/certbot /usr/bin/certbot
                             ;;
                         pip)
-                            info "📦 Installing certbot via pip..."
-                            command -v pip3 >/dev/null 2>&1 || { apt-get update -y && apt-get install -y python3-pip >/dev/null 2>&1; }
-                            if [[ ! -f /var/lib/lecbh_pip_deps_installed ]]; then
-                                mkdir -p /var/lib || true
-                                (apt-get update -y && apt-get install -y --no-install-recommends \
-                                    build-essential gcc python3-dev libssl-dev libffi-dev \
-                                    libaugeas0 libaugeas-dev augeas-tools >/dev/null 2>&1 && \
-                                    touch /var/lib/lecbh_pip_deps_installed) || warn "Failed to install some build dependencies for pip method"
-                            fi
-                            pip3 install --quiet certbot || die "Failed to install certbot via pip"
-                            pip3 install --quiet certbot-apache certbot-nginx || warn "Failed to install one or more certbot plugins"
-                            ln -sf /usr/local/bin/certbot /usr/bin/certbot || true
+                            install_certbot_with_pip
                             ;;
                         *) die "Unknown INSTALL_METHOD: $INSTALL_METHOD" ;;
                     esac
@@ -201,25 +193,23 @@ install_certbot() {
             ln -sf /snap/bin/certbot /usr/bin/certbot
             ;;
         pip)
-            info "📦 Installing certbot via pip..."
-            command -v pip3 >/dev/null 2>&1 || { apt-get update -y && apt-get install -y python3-pip >/dev/null 2>&1; }
-            if [[ ! -f /var/lib/lecbh_pip_deps_installed ]]; then
-                mkdir -p /var/lib || true
-                (apt-get update -y && apt-get install -y --no-install-recommends \
-                    build-essential gcc python3-dev libssl-dev libffi-dev \
-                    libaugeas0 libaugeas-dev augeas-tools >/dev/null 2>&1 && \
-                    touch /var/lib/lecbh_pip_deps_installed) || warn "Failed to install some build dependencies for pip method"
-            fi
-            pip3 install --quiet certbot || die "Failed to install certbot via pip"
-            if [[ $SERVER == apache ]]; then
-                pip3 install --quiet certbot-apache || warn "Failed to install certbot-apache plugin"
-            elif [[ $SERVER == nginx ]]; then
-                pip3 install --quiet certbot-nginx || warn "Failed to install certbot-nginx plugin"
-            fi
-            ln -sf /usr/local/bin/certbot /usr/bin/certbot || true
+            install_certbot_with_pip
             ;;
         *) die "Unknown INSTALL_METHOD: $INSTALL_METHOD" ;;
     esac
+}
+
+install_certbot_with_pip() {
+    local certbot_venv="/opt/certbot"
+    local plugin="certbot-${SERVER}"
+
+    info "📦 Installing certbot via pip in ${certbot_venv}..."
+    apt-get update -y
+    apt-get install -y --no-install-recommends python3-venv libaugeas0
+    python3 -m venv "$certbot_venv" || die "Failed to create Certbot virtual environment"
+    "$certbot_venv/bin/pip" install --upgrade certbot "$plugin" ||
+        die "Failed to install Certbot and ${plugin} in ${certbot_venv}"
+    ln -sf "$certbot_venv/bin/certbot" /usr/local/bin/certbot
 }
 
 ensure_server_running() {
@@ -273,19 +263,32 @@ check_existing_certs() {
 }
 
 build_certbot_args() {
-    CERTBOT_ARGS=(certbot certonly)
+    if $DRY_RUN || $TEST_MODE; then
+        CERTBOT_ARGS=(certbot certonly)
+    else
+        CERTBOT_ARGS=(certbot)
+    fi
     CERTBOT_ARGS+=("$CERTBOT_PLUGIN")
     for d in "${DOMAINS[@]}"; do CERTBOT_ARGS+=( -d "$d" ); done
-    CERTBOT_ARGS+=( --email "$EMAIL" --agree-tos --non-interactive )
+    if [[ -n "$EMAIL" ]]; then CERTBOT_ARGS+=( --email "$EMAIL" ); fi
+    if $UNATTENDED; then CERTBOT_ARGS+=( --agree-tos --non-interactive ); fi
     if $DRY_RUN; then CERTBOT_ARGS+=( --dry-run ); fi
     if $STAGING; then CERTBOT_ARGS+=( --staging ); fi
-    if ! $NO_REDIRECT; then CERTBOT_ARGS+=( --redirect ); fi
+    if ! $NO_REDIRECT && ! $DRY_RUN && ! $TEST_MODE; then CERTBOT_ARGS+=( --redirect ); fi
 }
 
 run_certbot() {
     info "🚀 Running: ${CERTBOT_ARGS[*]}"
-    ${CERTBOT_ARGS[@]} || die "Certbot command failed"
-    $DRY_RUN && info "${COLOR_OK} Dry run completed" || info "${COLOR_OK} Certificate request successful"
+    if $JSON_MODE; then
+        "${CERTBOT_ARGS[@]}" >&2 || die "Certbot command failed"
+    else
+        "${CERTBOT_ARGS[@]}" || die "Certbot command failed"
+    fi
+    if $DRY_RUN; then
+        info "${COLOR_OK} Dry run completed"
+    else
+        info "${COLOR_OK} Certificate request successful"
+    fi
 }
 
 test_renewal() {
@@ -293,10 +296,14 @@ test_renewal() {
     info "🔄 Testing renewal (dry-run)"
     certbot renew --dry-run >/dev/null 2>&1 || warn "Renewal dry-run failed"
     if [[ $INSTALL_METHOD == snap ]]; then
-        systemctl is-active --quiet certbot.timer 2>/dev/null && log "certbot.timer active" || warn "certbot.timer not active"
+        if systemctl is-active --quiet snap.certbot.renew.timer 2>/dev/null; then
+            log "snap.certbot.renew.timer active"
+        else
+            warn "snap.certbot.renew.timer not active"
+        fi
     elif [[ $INSTALL_METHOD == pip ]]; then
         crontab -l 2>/dev/null | grep -q 'certbot renew' || {
-            (crontab -l 2>/dev/null; echo "0 */12 * * * /usr/bin/certbot renew --quiet") | crontab -
+            (crontab -l 2>/dev/null; echo "0 */12 * * * sleep \"\$(shuf -i 0-3600 -n 1)\" && /usr/bin/certbot renew --quiet") | crontab -
             log "Installed cron renewal"
         }
     fi
@@ -321,18 +328,11 @@ main() {
     info "${COLOR_KEY} lecbh - Let's Encrypt Certbot Helper"
     info "----------------------------------------"
 
-    # Concurrency lock
-    if [[ -f "$LOCK_FILE" ]]; then
-        if grep -q '^PID=' "$LOCK_FILE"; then
-            existing_pid=$(grep '^PID=' "$LOCK_FILE" | cut -d'=' -f2)
-            if [[ -n "$existing_pid" && -d "/proc/$existing_pid" ]]; then
-                die "Another lecbh instance is running (PID $existing_pid). Use LECBH_LOCK_FILE to override."
-            fi
-        fi
-        warn "Stale lock file found; removing"
-        rm -f "$LOCK_FILE" || true
+    command -v flock >/dev/null 2>&1 || die "flock is required to safely prevent concurrent runs"
+    if ! exec 9>"$LOCK_FILE"; then
+        die "Cannot open lock file ($LOCK_FILE)"
     fi
-    echo "PID=$$" > "$LOCK_FILE" 2>/dev/null || warn "Cannot create lock file ($LOCK_FILE). Continuing without lock."
+    flock -n 9 || die "Another lecbh instance is running (lock: $LOCK_FILE)"
 
     # Determine interactive inputs
     DOMAIN_INPUT=${DOMAINS_OVERRIDE:-$DEFAULT_DOMAINS}
@@ -348,7 +348,7 @@ main() {
         log "Unattended mode values: domains=$DOMAIN_INPUT email=$EMAIL server=$SERVER method=$INSTALL_METHOD"
     fi
 
-    validate_email "$EMAIL"
+    [[ -z "$EMAIL" ]] || validate_email "$EMAIL"
     IFS=',' read -r -a DOMAINS <<<"$DOMAIN_INPUT"
     local cleaned=()
     for d in "${DOMAINS[@]}"; do
@@ -357,7 +357,7 @@ main() {
         validate_domain "$d"
         cleaned+=("$d")
     done
-    DOMAINS=(${cleaned[@]})
+    DOMAINS=("${cleaned[@]}")
     [[ ${#DOMAINS[@]} -gt 0 ]] || die "No valid domains provided"
 
     resolve_domain "${DOMAINS[0]}" || warn "Primary domain not resolvable"
@@ -380,7 +380,7 @@ main() {
             for i in "${!DOMAINS[@]}"; do
                 d=${DOMAINS[$i]}
                 if [[ $i -gt 0 ]]; then domains_json+=","; fi
-                domains_json+="\"$d\""
+                domains_json+="$(json_quote "$d")"
             done
             domains_json+="]"
         else
@@ -389,7 +389,7 @@ main() {
         cat <<JEOF
 {
   "domains": $domains_json,
-  "email": "${EMAIL}",
+  "email": $(json_quote "$EMAIL"),
   "server": "${SERVER}",
   "install_method": "${INSTALL_METHOD}",
   "dry_run": ${DRY_RUN},
@@ -397,11 +397,12 @@ main() {
   "test_mode": ${TEST_MODE},
   "redirect": $(! $NO_REDIRECT && echo true || echo false),
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "1.1.0"
+  "version": "${VERSION}"
 }
 JEOF
     else
-        info "\n📝 Next steps:"
+        info ""
+        info "📝 Next steps:"
         info "   1. Test SSL: https://www.ssllabs.com/ssltest/"
         info "   2. Consider enabling HSTS"
         info "   3. Verify HTTP->HTTPS redirect (if enabled)"
