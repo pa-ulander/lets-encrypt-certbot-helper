@@ -100,7 +100,7 @@ Versioning: Semantic Versioning (https://semver.org/)
 - No breaking changes; previous invocation patterns continue to work.
 - Recommend switching from editing defaults in the script to env/flag overrides for automation.
 
-[1.1.0]: https://github.com/pa-ulander/lecbh/compare/v1.0.0...v1.1.0
+[1.1.0]: https://github.com/pa-ulander/lets-encrypt-certbot-helper/compare/v1.0.0...v1.1.0
 
 
 ## [1.0.0] - 2025-09-06
@@ -131,4 +131,4 @@ Versioning: Semantic Versioning (https://semver.org/)
 - `README.md` (feature overview, usage, troubleshooting)
 - `UNLICENSE` (public domain dedication)
 
-[1.0.0]: https://github.com/pa-ulander/lecbh/releases/tag/v1.0.0
+[1.0.0]: https://github.com/pa-ulander/lets-encrypt-certbot-helper/releases/tag/v1.0.0

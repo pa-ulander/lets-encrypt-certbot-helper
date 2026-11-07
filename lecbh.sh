@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # lecbh - Let's Encrypt Certbot Helper for Apache/Nginx on Ubuntu
-# https://github.com/pa-ulander/lecbh
+# https://github.com/pa-ulander/lets-encrypt-certbot-helper
 
 set -euo pipefail
 IFS=$'\n\t'

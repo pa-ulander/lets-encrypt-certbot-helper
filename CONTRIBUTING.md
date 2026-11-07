@@ -5,8 +5,8 @@ Thanks for your interest in improving lecbh. This guide covers the development w
 ## Quick Start
 
 ```bash
-git clone https://github.com/pa-ulander/lecbh.git
-cd lecbh
+git clone https://github.com/pa-ulander/lets-encrypt-certbot-helper.git
+cd lets-encrypt-certbot-helper
 bats tests/bats
 ./test.sh
 ```
