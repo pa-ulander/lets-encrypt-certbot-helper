@@ -209,7 +209,7 @@ install_certbot_with_pip() {
     python3 -m venv "$certbot_venv" || die "Failed to create Certbot virtual environment"
     "$certbot_venv/bin/pip" install --upgrade certbot "$plugin" ||
         die "Failed to install Certbot and ${plugin} in ${certbot_venv}"
-    ln -sf "$certbot_venv/bin/certbot" /usr/local/bin/certbot
+    ln -sf "$certbot_venv/bin/certbot" /usr/bin/certbot
 }
 
 ensure_server_running() {
