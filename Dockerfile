@@ -24,6 +24,7 @@ RUN sed -i \
 
 WORKDIR /app
 COPY lecbh.sh /app/lecbh.sh
+COPY lib/ /app/lib/
 
 HEALTHCHECK --interval=2s --timeout=3s --retries=15 \
     CMD nc -z localhost 80 && nc -z localhost 8080
