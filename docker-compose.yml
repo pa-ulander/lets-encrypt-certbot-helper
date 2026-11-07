@@ -1,20 +1,6 @@
-version: "3"
-
 services:
   lecbh-test:
     build: .
-    container_name: lecbh-test
-    privileged: true # Required for systemd
+    init: true
     volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - ./lecbh.sh:/app/lecbh.sh
-    ports:
-      - "80:80"
-    #  - "443:443"
-    # Keep the container running
-    tty: true
-    command: /lib/systemd/systemd
-    restart: unless-stopped
-    cap_add:
-      - SYS_ADMIN
-    stop_signal: SIGRTMIN+3
+      - ./lecbh.sh:/app/lecbh.sh:ro
