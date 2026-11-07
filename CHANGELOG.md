@@ -1,9 +1,6 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)  
-Versioning: Semantic Versioning (https://semver.org/)
+All notable changes to this project will be documented in this file. 
 
 ## [1.2.0] - 2026-11-07
 ### Added
