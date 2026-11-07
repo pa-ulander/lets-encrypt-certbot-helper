@@ -2,46 +2,45 @@
 
 # lecbh - Let's Encrypt Certbot Helper for Apache/Nginx on Ubuntu
 # https://github.com/pa-ulander/lecbh
-# Version: 1.2.0
 
 set -euo pipefail
 IFS=$'\n\t'
-LOCK_FILE="${LECBH_LOCK_FILE:-/var/run/lecbh.lock}"
-VERSION="1.2.0"
-JSON_MODE=false
 
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+LECBH_LIB_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib"
+for _lib in core logging lock; do
+    if [[ ! -r "$LECBH_LIB_DIR/$_lib.sh" ]]; then
+        echo "lecbh: missing library $LECBH_LIB_DIR/$_lib.sh (keep lib/ next to lecbh.sh)" >&2
+        exit 1
+    fi
+done
+unset _lib
+# shellcheck source=lib/core.sh
+source "$LECBH_LIB_DIR/core.sh"
+# shellcheck source=lib/logging.sh
+source "$LECBH_LIB_DIR/logging.sh"
+# shellcheck source=lib/lock.sh
+source "$LECBH_LIB_DIR/lock.sh"
+
+LOCK_FILE="${LECBH_LOCK_FILE:-/var/run/lecbh.lock}"
 
 # -------------------- DEFAULT CONFIG (env overrides allowed) --------------------
 : "${DEFAULT_EMAIL:=}"
 : "${DEFAULT_DOMAINS:=example.com}"
 : "${DEFAULT_SERVER:=apache}"
 : "${DEFAULT_INSTALL_METHOD:=snap}" # snap | pip
-: "${LECBH_NO_COLOR:=0}" # set to 1 to disable emojis/colors
 # --------------------------------------------------------------------------------
-
-DRY_RUN=false
-UNATTENDED=false
-VERBOSE=false
-STAGING=false
-TEST_MODE=false
-QUIET=false
-NO_REDIRECT=false
-INSTALL_METHOD="$DEFAULT_INSTALL_METHOD"
-
-SERVER=""
-EMAIL_OVERRIDE=""
-DOMAINS_OVERRIDE=""
-
-COLOR_OK="✅"; COLOR_WARN="⚠️"; COLOR_ERR="❌"; COLOR_INFO="🔍"; COLOR_KEY="🔐"
-if [[ "$LECBH_NO_COLOR" == "1" ]]; then
-    COLOR_OK="[OK]"; COLOR_WARN="[WARN]"; COLOR_ERR="[ERR]"; COLOR_INFO="[INFO]"; COLOR_KEY="[LECBH]"
-fi
 
 usage() {
     cat <<EOF
-Usage: sudo ./lecbh.sh [OPTIONS]
+Usage: sudo ./lecbh.sh [COMMAND] [OPTIONS]
+
+Commands:
+    issue                    Obtain and install a certificate (default when omitted)
+    version                  Print the lecbh version (JSON with --json)
+    help                     Show this help
 
 Options:
     --dry-run                Test issuance without installing a certificate
@@ -56,57 +55,16 @@ Options:
     --email=ADDR             Optional email address (overrides DEFAULT_EMAIL)
     --domains=a.com,b.com    Comma separated domain list
     --no-redirect            Do not force HTTP->HTTPS redirect
-    --json                   Output machine-readable JSON summary (implies quiet except errors)
-    --help                   Show this help and exit
+    --json                   Output machine-readable JSON (implies quiet except errors)
+    --version                Same as the version command
+    --help, -h               Show this help and exit
 
 Examples:
-    sudo ./lecbh.sh --unattended --server=nginx \\
+    sudo ./lecbh.sh issue --unattended --server=nginx \\
              --domains=example.org,www.example.org --email=admin@example.org
     sudo ./lecbh.sh --dry-run --staging --unattended
+    ./lecbh.sh version --json
 EOF
-}
-
-log() { if $VERBOSE && ! $QUIET; then echo "${COLOR_INFO} $*" >&2; fi; return 0; }
-info() { if ! $QUIET; then echo "$*" >&2; fi; return 0; }
-warn() { echo "${COLOR_WARN} $*" >&2; return 0; }
-die() { echo "${COLOR_ERR} $*" >&2; exit 1; }
-
-json_quote() {
-    printf '"%s"' "$1"
-}
-
-parse_flags() {
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --dry-run) DRY_RUN=true ;;
-            --unattended) UNATTENDED=true ;;
-            --verbose) VERBOSE=true ;;
-            --quiet) QUIET=true ; VERBOSE=false ;;
-            --staging) STAGING=true ;;
-            --test-mode) TEST_MODE=true ;;
-            --pip) INSTALL_METHOD="pip" ;;
-            --snap) INSTALL_METHOD="snap" ;;
-            --server=*) SERVER="${1#*=}" ;;
-            --email=*) EMAIL_OVERRIDE="${1#*=}" ;;
-            --domains=*) DOMAINS_OVERRIDE="${1#*=}" ;;
-            --no-redirect) NO_REDIRECT=true ;;
-            --json) JSON_MODE=true ; QUIET=true ; VERBOSE=false ;;
-            --help) usage; exit 0 ;;
-            *) die "Unknown option: $1 (use --help)" ;;
-        esac
-        shift
-    done
-}
-
-validate_email() {
-    [[ $1 =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] ||
-        die "Invalid email: $1"
-}
-
-validate_domain() {
-    [[ $1 != *'*'* ]] || die "Wildcard domains require DNS-01 validation, which is not supported yet: $1"
-    [[ ${#1} -le 253 && $1 =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] ||
-        die "Invalid domain: $1"
 }
 
 resolve_domain() {
@@ -221,7 +179,6 @@ ensure_server_running() {
                 service apache2 start >/dev/null 2>&1 || true
             fi
             pgrep -x apache2 >/dev/null 2>&1 || warn "Apache process not detected (continuing)"
-            CERTBOT_PLUGIN="--apache"
             ;;
         nginx)
             command -v nginx >/dev/null 2>&1 || die "Nginx not installed"
@@ -229,7 +186,6 @@ ensure_server_running() {
                 service nginx start >/dev/null 2>&1 || true
             fi
             pgrep -x nginx >/dev/null 2>&1 || warn "Nginx process not detected (continuing)"
-            CERTBOT_PLUGIN="--nginx"
             ;;
         *) die "Unsupported server: $server" ;;
     esac
@@ -263,18 +219,10 @@ check_existing_certs() {
 }
 
 build_certbot_args() {
-    if $DRY_RUN || $TEST_MODE; then
-        CERTBOT_ARGS=(certbot certonly)
-    else
-        CERTBOT_ARGS=(certbot)
-    fi
-    CERTBOT_ARGS+=("$CERTBOT_PLUGIN")
-    for d in "${DOMAINS[@]}"; do CERTBOT_ARGS+=( -d "$d" ); done
-    if [[ -n "$EMAIL" ]]; then CERTBOT_ARGS+=( --email "$EMAIL" ); fi
-    if $UNATTENDED; then CERTBOT_ARGS+=( --agree-tos --non-interactive ); fi
-    if $DRY_RUN; then CERTBOT_ARGS+=( --dry-run ); fi
-    if $STAGING; then CERTBOT_ARGS+=( --staging ); fi
-    if ! $NO_REDIRECT && ! $DRY_RUN && ! $TEST_MODE; then CERTBOT_ARGS+=( --redirect ); fi
+    local redirect=true
+    if $NO_REDIRECT; then redirect=false; fi
+    mapfile -t CERTBOT_ARGS < <(lecbh_certbot_args "$SERVER" "$EMAIL" "$DRY_RUN" "$TEST_MODE" \
+        "$STAGING" "$redirect" "$UNATTENDED" "${DOMAINS[@]}")
 }
 
 run_certbot() {
@@ -322,43 +270,54 @@ final_report() {
     info "🔒 Your site should now be accessible via HTTPS."
 }
 
-main() {
-    parse_flags "$@"
+cmd_version() {
+    if $JSON_MODE; then
+        lecbh_version_json
+    else
+        printf '%s\n' "$LECBH_VERSION"
+    fi
+}
+
+cmd_issue() {
     ensure_root
     info "${COLOR_KEY} lecbh - Let's Encrypt Certbot Helper"
     info "----------------------------------------"
 
-    command -v flock >/dev/null 2>&1 || die "flock is required to safely prevent concurrent runs"
-    if ! exec 9>"$LOCK_FILE"; then
-        die "Cannot open lock file ($LOCK_FILE)"
-    fi
-    flock -n 9 || die "Another lecbh instance is running (lock: $LOCK_FILE)"
+    local rc=0
+    lecbh_acquire_lock "$LOCK_FILE" || rc=$?
+    case $rc in
+        0) ;;
+        1) die "Another lecbh instance is running (lock: $LOCK_FILE)" ;;
+        2) die "flock is required to safely prevent concurrent runs" ;;
+        *) die "Cannot open lock file ($LOCK_FILE)" ;;
+    esac
 
-    # Determine interactive inputs
-    DOMAIN_INPUT=${DOMAINS_OVERRIDE:-$DEFAULT_DOMAINS}
+    local domain_input inp d
+    domain_input=${DOMAINS_OVERRIDE:-$DEFAULT_DOMAINS}
     EMAIL=${EMAIL_OVERRIDE:-$DEFAULT_EMAIL}
     SERVER=${SERVER:-$DEFAULT_SERVER}
 
     if ! $UNATTENDED; then
-        read -r -p "🌐 Domains [$DOMAIN_INPUT]: " inp || true; DOMAIN_INPUT=${inp:-$DOMAIN_INPUT}
-        read -r -p "📧 Email [$EMAIL]: " inp || true; EMAIL=${inp:-$EMAIL}
+        read -r -p "🌐 Domains [$domain_input]: " inp || true; domain_input=${inp:-$domain_input}
+        read -r -p "📧 Email (optional) [$EMAIL]: " inp || true; EMAIL=${inp:-$EMAIL}
         read -r -p "🖥️ Server (apache/nginx) [$SERVER]: " inp || true; SERVER=${inp:-$SERVER}
         read -r -p "🔧 Install method (snap/pip) [$INSTALL_METHOD]: " inp || true; INSTALL_METHOD=${inp:-$INSTALL_METHOD}
     else
-        log "Unattended mode values: domains=$DOMAIN_INPUT email=$EMAIL server=$SERVER method=$INSTALL_METHOD"
+        log "Unattended mode values: domains=$domain_input email=$EMAIL server=$SERVER method=$INSTALL_METHOD"
     fi
 
-    [[ -z "$EMAIL" ]] || validate_email "$EMAIL"
-    IFS=',' read -r -a DOMAINS <<<"$DOMAIN_INPUT"
-    local cleaned=()
-    for d in "${DOMAINS[@]}"; do
-        d=$(echo "$d" | xargs)
-        [[ -z $d ]] && continue
-        validate_domain "$d"
-        cleaned+=("$d")
-    done
-    DOMAINS=("${cleaned[@]}")
+    if [[ -n $EMAIL ]] && ! lecbh_is_valid_email "$EMAIL"; then die "Invalid email: $EMAIL"; fi
+    lecbh_is_valid_server "$SERVER" || die "Unsupported server: $SERVER"
+    lecbh_is_valid_install_method "$INSTALL_METHOD" || die "Unknown install method: $INSTALL_METHOD"
+
+    mapfile -t DOMAINS < <(lecbh_split_domains "$domain_input")
     [[ ${#DOMAINS[@]} -gt 0 ]] || die "No valid domains provided"
+    for d in "${DOMAINS[@]}"; do
+        if lecbh_is_wildcard_domain "$d"; then
+            die "Wildcard domains require DNS-01 validation, which is not supported yet: $d"
+        fi
+        lecbh_is_valid_domain "$d" || die "Invalid domain: $d"
+    done
 
     resolve_domain "${DOMAINS[0]}" || warn "Primary domain not resolvable"
 
@@ -373,33 +332,10 @@ main() {
     final_report
 
     if $JSON_MODE; then
-        # Build JSON object
-        # Build proper JSON array of domains
-        if ((${#DOMAINS[@]})); then
-            domains_json="["
-            for i in "${!DOMAINS[@]}"; do
-                d=${DOMAINS[$i]}
-                if [[ $i -gt 0 ]]; then domains_json+=","; fi
-                domains_json+="$(json_quote "$d")"
-            done
-            domains_json+="]"
-        else
-            domains_json="[]"
-        fi
-        cat <<JEOF
-{
-  "domains": $domains_json,
-  "email": $(json_quote "$EMAIL"),
-  "server": "${SERVER}",
-  "install_method": "${INSTALL_METHOD}",
-  "dry_run": ${DRY_RUN},
-  "staging": ${STAGING},
-  "test_mode": ${TEST_MODE},
-  "redirect": $(! $NO_REDIRECT && echo true || echo false),
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "${VERSION}"
-}
-JEOF
+        local redirect=true
+        if $NO_REDIRECT; then redirect=false; fi
+        lecbh_result_json "$EMAIL" "$SERVER" "$INSTALL_METHOD" "$DRY_RUN" "$STAGING" "$TEST_MODE" \
+            "$redirect" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${DOMAINS[@]}"
     else
         info ""
         info "📝 Next steps:"
@@ -411,6 +347,29 @@ JEOF
     if [[ -n "${LECBH_SLEEP_BEFORE_EXIT:-}" ]]; then
         sleep "$LECBH_SLEEP_BEFORE_EXIT"
     fi
+}
+
+main() {
+    local command=issue
+    if [[ $# -gt 0 && $1 != -* ]]; then
+        command=$1
+        shift
+    fi
+
+    lecbh_reset_options
+    lecbh_parse_flags "$@" || die "$LECBH_ERROR"
+
+    if $SHOW_HELP || [[ $command == help ]]; then
+        usage
+        return 0
+    fi
+    if $SHOW_VERSION; then command=version; fi
+
+    case $command in
+        issue) cmd_issue ;;
+        version) cmd_version ;;
+        *) die "Unknown command: $command (use --help)" ;;
+    esac
 }
 
 main "$@"
