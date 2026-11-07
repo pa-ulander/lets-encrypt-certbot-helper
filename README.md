@@ -270,11 +270,13 @@ Certbot logs can be found at:
 
 Issues, pull requests, code reviews, and feedback are welcome. See the [contributing guide](CONTRIBUTING.md) for the development workflow and project conventions.
 
-## License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
 *   [Let's Encrypt](https://letsencrypt.org/) for providing free SSL certificates
 *   [Certbot](https://certbot.eff.org/) for the excellent certificate management tool
+
+## MIT License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
