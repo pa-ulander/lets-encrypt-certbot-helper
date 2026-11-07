@@ -1,4 +1,4 @@
-[![Test Status](https://github.com/pa-ulander/lecbh/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pa-ulander/lecbh/actions/workflows/test.yml)
+[![Test Status](https://github.com/pa-ulander/lecbh/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pa-ulander/lets-encrypt-certbot-helper/actions/workflows/test.yml)
 
 # Let's Encrypt Certbot Helper
 
