@@ -29,23 +29,22 @@
 
 ## Features
 
-*   Automatically installs and configures Let's Encrypt SSL certificates
+*   Obtains certificates and configures Apache or Nginx to serve them over HTTPS
 *   Supports both Apache and Nginx web servers
 *   Sets up automatic certificate renewal
-*   Validates domain configuration before requesting certificates
+*   Validates domain and optional contact email before requesting certificates
 *   Supports multiple domains in a single certificate
-*   Includes dry-run mode for testing without making changes
+*   Includes dry-run mode to exercise issuance without installing a certificate
 *   Provides staging mode for development without hitting rate limits
 *   Works with unattended mode for automated deployments
-*   Supports installation via Snap (default) or pip
+*   Supports installation via Snap (default) or pip in a virtual environment
 *   Includes test mode for Docker/container environments
 *   JSON output mode for automation (`--json`)
 *   Concurrency lock to prevent overlapping runs
 
 ## Requirements
 
-*   Ubuntu (tested on 20.04 / 22.04)
-*   Apache2 or Nginx installed and running
+*   Ubuntu with Apache2 or Nginx installed
 *   Domain name(s) pointing to your server's public IP
 *   Ports 80 and 443 open on your firewall
 
@@ -77,7 +76,7 @@ sudo ./lecbh.sh
 The script will prompt you for:
 
 *   Domain name(s) (comma-separated for multiple domains)
-*   Email address for Let's Encrypt registration
+*   Optional email address for Let's Encrypt registration
 *   Web server type (Apache or Nginx)
 *   Installation method (snap or pip)
 
@@ -87,7 +86,7 @@ The script will prompt you for:
 Usage: sudo ./lecbh.sh [OPTIONS]
 
 Options:
-  --dry-run                Test run (no real certs issued)
+  --dry-run                Test issuance without installing a certificate
   --unattended             Non-interactive (use defaults / flags)
   --verbose                Extra logging
   --quiet                  Minimal output
@@ -95,7 +94,7 @@ Options:
   --test-mode              Mock certbot (for CI / containers)
   --pip / --snap           Select install method (default: snap)
   --server=apache|nginx    Web server type
-  --email=ADDR             Account email
+  --email=ADDR             Optional account email
   --domains=a.com,b.com    Comma separated domains list
   --no-redirect            Disable HTTP→HTTPS redirect
   --json                   Emit JSON summary (implies --quiet)
@@ -128,7 +127,7 @@ Show detailed output:
 sudo ./lecbh.sh --verbose
 ```
 
-Use pip installation method instead of snap:
+Use pip installation method instead of snap (installed in /opt/certbot):
 
 ```
 sudo ./lecbh.sh --pip
@@ -145,7 +144,7 @@ sudo ./lecbh.sh --test-mode
 Defaults can be overridden via environment variables or flags. Examples:
 
 ```
-export DEFAULT_EMAIL="admin@example.com"
+export DEFAULT_EMAIL="ops@yourdomain.com"
 export DEFAULT_DOMAINS="example.com,www.example.com"
 export DEFAULT_SERVER="nginx"
 export DEFAULT_INSTALL_METHOD="pip"
@@ -155,12 +154,12 @@ sudo ./lecbh.sh --unattended
 Inline override:
 
 ```
-DEFAULT_EMAIL=ops@example.org DEFAULT_DOMAINS="example.org,www.example.org" \
+DEFAULT_EMAIL=ops@yourdomain.com DEFAULT_DOMAINS="example.org,www.example.org" \
   sudo ./lecbh.sh --unattended --server=nginx
 ```
 ## JSON Output Mode
 
-Use `--json` to produce a machine-readable summary. Helpful for pipelines or provisioning systems:
+Use `--json` to produce a machine-readable summary on stdout. Certbot progress and errors go to stderr, so successful output can be parsed directly. Failed runs exit non-zero and do not emit a success summary.
 
 ```
 sudo ./lecbh.sh --unattended --server=nginx \
@@ -180,7 +179,7 @@ Sample (values illustrative):
   "test_mode": false,
   "redirect": true,
   "timestamp": "2025-01-01T00:00:00Z",
-  "version": "1.1.0"
+  "version": "1.2.0"
 }
 ```
 
@@ -192,15 +191,18 @@ sudo ./lecbh.sh --unattended --json | jq -r '.domains[]'
 
 ## Concurrency Lock
 
-The script uses a lock file (`/var/run/lecbh.lock` by default) to prevent overlapping runs. Override with `LECBH_LOCK_FILE` if needed. Stale locks are removed automatically if the owning process no longer exists.
+The script uses `flock` on a lock file (`/var/run/lecbh.lock` by default) to prevent overlapping runs. Override with `LECBH_LOCK_FILE` if needed. The lock file may remain after exit; the kernel releases the lock automatically.
 
 
 ## Certificate Renewal
 
-Let's Encrypt certificates expire every 90 days. The script ensures your system is set up for automatic renewal:
+The account email is optional. Since June 2025, Let's Encrypt no longer sends expiration notification emails; renewal monitoring must be configured separately.
 
-*   With snap installation: Sets up systemd timer for automatic renewal
-*   With pip installation: Configures a cron job to run every 12 hours
+Let's Encrypt certificate lifetimes are being shortened: 64 days from February 2027, then 45 days from February 2028. Keep automatic renewal operational and monitor it independently:
+
+*   With snap installation: Certbot's snap provides a systemd timer for automatic renewal.
+*   With pip installation: lecbh installs a cron job every 12 hours with a randomized delay.
+*   On successful issuance, the selected Apache/Nginx plugin installs the certificate. `--dry-run` exercises issuance only and does not change web-server configuration.
 
 You can test the renewal process with:
 
@@ -211,7 +213,7 @@ sudo certbot renew --dry-run
 To check the status of the renewal timer (snap installation):
 
 ```
-systemctl status certbot.timer
+systemctl status snap.certbot.renew.timer
 ```
 
 To check the cron job (pip installation):
@@ -240,7 +242,7 @@ For detailed information about testing procedures and environments, see the [Tes
 
 **Rate limits**: If you hit Let's Encrypt rate limits, use the `--staging` flag for testing.
 
-**Snap not available**: If snap is not available or preferred, use `--pip` to install via pip instead.
+**Snap not available**: If snap is not available or preferred, use `--pip` to install in a virtual environment. Certbot documents pip support as best-effort; prefer the system-recommended installation method when possible.
 
 ### Logs
 
