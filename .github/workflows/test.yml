@@ -5,42 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
-      # We'll use a simpler approach - just cache the installed packages status
-      - name: Install dependencies (web servers + tools only)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends apache2 nginx netcat-openbsd
-
-      - name: Make script executable
-        run: chmod +x ./lecbh.sh
-
-      - name: Configure hosts file for testing with valid domain
-        run: |
-          TEST_DOMAIN="test-$(date +%s).example.org"
-          echo "Using test domain: $TEST_DOMAIN"
-          echo "127.0.0.1 $TEST_DOMAIN" | sudo tee -a /etc/hosts
-          ping -c 1 $TEST_DOMAIN
-          echo "TEST_DOMAIN=$TEST_DOMAIN" >> $GITHUB_ENV
-
-      - name: Test with Apache (mock certbot)
-        run: |
-          sudo ./lecbh.sh --dry-run --unattended --test-mode --verbose \
-            --server=apache --domains="$TEST_DOMAIN" --email="admin@$TEST_DOMAIN"
-
-      - name: Switch to Nginx
-        run: |
-          sudo systemctl stop apache2 || true
-          sudo systemctl start nginx
-          sudo systemctl status nginx --no-pager
-
-      - name: Test with Nginx (mock certbot)
-        run: |
-          sudo ./lecbh.sh --dry-run --unattended --test-mode --verbose \
-            --server=nginx --domains="$TEST_DOMAIN" --email="admin@$TEST_DOMAIN"
+      - name: Run container test suite
+        run: ./test.sh
