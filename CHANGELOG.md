@@ -17,7 +17,10 @@ Versioning: Semantic Versioning (https://semver.org/)
 
 ### Documentation
 - README renewal section covers the 2027/2028 lifetime changes, revalidation on renewal, ARI, and certificate profiles.
-- Roadmap: dropped OCSP must-staple; added ACME profile selection and ARI-driven renewal to M3; recorded the wildcard → DNS-01 decision and related decisions in the meta design log.
+- Added contributor guidance, issue and pull request templates, a Code of Conduct, maintainer ownership, and a private vulnerability reporting policy.
+
+### Changed
+- Changed the project license from Unlicense to MIT. Previously distributed versions remain under their original license.
 
 ### Fixed
 - Pip installs now symlink `/usr/bin/certbot` (as documented by Certbot), matching the path used by the renewal cron job.
