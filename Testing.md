@@ -34,6 +34,8 @@ Lint the scripts:
 shellcheck -x lecbh.sh lib/*.sh test.sh tests/bats/*.bats tests/bats/*.bash
 ```
 
+The `cleanup` function in `test.sh` is invoked indirectly by an `EXIT` trap. Its function-scoped ShellCheck directive suppresses SC2317 (unreachable commands in ShellCheck 0.9.0) and SC2329 (an apparently unused function), without disabling these checks elsewhere.
+
 ### Test semantics
 
 *   `expect_pass NAME CMD` passes only if `CMD` exits 0.

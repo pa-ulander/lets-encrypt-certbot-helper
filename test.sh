@@ -25,7 +25,7 @@ passed=0
 failed=0
 failed_names=()
 
-# shellcheck disable=SC2329 # invoked via trap
+# shellcheck disable=SC2317,SC2329 # invoked via trap
 cleanup() {
     echo -e "${YELLOW}Cleaning up Docker container...${NC}"
     "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
