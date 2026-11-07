@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)  
 Versioning: Semantic Versioning (https://semver.org/)
 
+## [Unreleased]
+### Fixed
+- Pip installs now symlink `/usr/bin/certbot` (as documented by Certbot), matching the path used by the renewal cron job.
+
+### CI / Internal
+- Test container moved to Ubuntu 24.04 without privileged mode, systemd, or host port mappings. A healthcheck gates test start.
+- `test.sh` uses `docker compose` (v2), always tears down the container, and exits non-zero on failure.
+- Expected-failure tests now require a non-zero exit *and* a matching error message.
+- Added `jq`-based JSON schema tests, a lock-release test, and verification of the pip virtualenv install.
+- ShellCheck is now blocking and lints all tracked `*.sh` files. Workflows use `actions/checkout@v5` on `ubuntu-24.04`.
+- CI runs the full container suite (`./test.sh`).
+- Removed stale root-level `test.yml`.
+
 ## [1.2.0] - 2026-11-07
 ### Fixed
 - Real issuance now uses Certbot's Apache/Nginx installer, while dry-runs remain `certonly` and do not modify server configuration.
