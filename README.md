@@ -63,6 +63,8 @@ Make the script executable:
 chmod +x lecbh.sh
 ```
 
+`lecbh.sh` loads its helpers from the `lib/` directory next to it. Keep `lib/` alongside the script when copying it elsewhere; symlinking `lecbh.sh` (e.g. into `/usr/local/bin`) works.
+
 ## Usage
 
 ### Basic Usage
@@ -83,7 +85,12 @@ The script will prompt you for:
 ### Command Line Options
 
 ```
-Usage: sudo ./lecbh.sh [OPTIONS]
+Usage: sudo ./lecbh.sh [COMMAND] [OPTIONS]
+
+Commands:
+  issue                    Obtain and install a certificate (default when omitted)
+  version                  Print the lecbh version (JSON with --json)
+  help                     Show help
 
 Options:
   --dry-run                Test issuance without installing a certificate
@@ -98,8 +105,11 @@ Options:
   --domains=a.com,b.com    Comma separated domains list
   --no-redirect            Disable HTTP→HTTPS redirect
   --json                   Emit JSON summary (implies --quiet)
-  --help                   Show help
+  --version                Same as the version command
+  --help, -h               Show help
 ```
+
+Running without a command is the same as `issue`, so existing invocations keep working. `version` and `help` do not require root.
 
 ### Examples
 
@@ -183,6 +193,8 @@ Sample (values illustrative):
 }
 ```
 
+Fields always appear in this order. The full schema, including `lecbh version --json` (`{"version": "1.2.0"}`), is documented in [docs/json-schema.md](docs/json-schema.md).
+
 Parse with `jq`:
 
 ```
@@ -226,7 +238,9 @@ crontab -l | grep certbot
 
 For development and testing, use the `--staging` flag to avoid rate limits, and `--test-mode` to mock certbot operations inside CI or container environments.
 
-Run `./test.sh` to execute the integration suite in a disposable Ubuntu 24.04 container (requires Docker Compose v2). CI runs the same suite plus a blocking ShellCheck lint.
+Pure logic (flag parsing, validation, Certbot arguments, JSON) lives in `lib/core.sh`, logging in `lib/logging.sh`, and locking in `lib/lock.sh`; `lecbh.sh` holds the side-effecting steps and the command dispatcher.
+
+Run `bats tests/bats` for the fast unit tests (needs [Bats](https://github.com/bats-core/bats-core) and `jq`), and `./test.sh` for the integration suite in a disposable Ubuntu 24.04 container (requires Docker Compose v2). CI runs both plus a blocking ShellCheck lint.
 
 For detailed information about testing procedures and environments, see the [Testing documentation](Testing.md).
 
