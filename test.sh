@@ -18,8 +18,8 @@ else
     exit 1
 fi
 
-EXPECTED_VERSION=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' lecbh.sh)
-[[ -n $EXPECTED_VERSION ]] || { echo "Cannot read VERSION from lecbh.sh" >&2; exit 1; }
+EXPECTED_VERSION=$(sed -n 's/^LECBH_VERSION="\(.*\)"$/\1/p' lib/core.sh)
+[[ -n $EXPECTED_VERSION ]] || { echo "Cannot read LECBH_VERSION from lib/core.sh" >&2; exit 1; }
 
 passed=0
 failed=0
@@ -98,6 +98,14 @@ expect_pass "Dry run uses certonly with --dry-run" \
 expect_pass "Omitted email is not passed to certbot" \
     "! $LECBH --dry-run $MOCK --server=apache --domains=example.com 2>&1 | grep -- '--email' >/dev/null"
 
+echo -e "${YELLOW}==== Commands ====${NC}"
+expect_pass "version prints the semver" "[ \"\$($LECBH version)\" = \"\$EXPECTED_VERSION\" ]"
+expect_pass "--version matches version" "[ \"\$($LECBH --version)\" = \"\$EXPECTED_VERSION\" ]"
+expect_pass "version --json" \
+    "$LECBH version --json | jq -e --arg v \"\$EXPECTED_VERSION\" '. == {version: \$v}' >/dev/null"
+expect_pass "Explicit issue command" "$LECBH issue --dry-run $MOCK --server=apache --domains=example.com"
+expect_fail "Unknown command is rejected" "Unknown command: frobnicate" "$LECBH frobnicate"
+
 echo -e "${YELLOW}==== JSON output ====${NC}"
 expect_pass "JSON output is valid and matches schema" "
     $LECBH --dry-run $MOCK --server=apache --domains=example.com,www.example.com --email=ops@example.org --json 2>/dev/null |
@@ -120,6 +128,8 @@ expect_pass "JSON stdout is empty on failure" "
 echo -e "${YELLOW}==== Input validation ====${NC}"
 expect_fail "Invalid domain is rejected" "Invalid domain: bad_domain" \
     "$LECBH --dry-run $MOCK --server=apache --domains=bad_domain"
+expect_fail "IP address is rejected as a domain" "Invalid domain: 192.0.2.1" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=192.0.2.1"
 expect_fail "Invalid email is rejected" "Invalid email: not-an-email" \
     "$LECBH --dry-run $MOCK --server=apache --domains=example.com --email=not-an-email"
 expect_fail "Wildcard domain is rejected" "require DNS-01" \
