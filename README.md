@@ -226,7 +226,7 @@ crontab -l | grep certbot
 
 For development and testing, use the `--staging` flag to avoid rate limits, and `--test-mode` to mock certbot operations inside CI or container environments.
 
-Docker can be used for testing the script in an isolated environment. See the included Dockerfile and docker-compose.yml for details.
+Run `./test.sh` to execute the integration suite in a disposable Ubuntu 24.04 container (requires Docker Compose v2). CI runs the same suite plus a blocking ShellCheck lint.
 
 For detailed information about testing procedures and environments, see the [Testing documentation](Testing.md).
 
