@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)  
 Versioning: Semantic Versioning (https://semver.org/)
 
+## [1.2.0] - 2026-11-07
+### Fixed
+- Real issuance now uses Certbot's Apache/Nginx installer, while dry-runs remain `certonly` and do not modify server configuration.
+- Kept JSON output parseable by sending Certbot output to stderr and quoting validated JSON string values.
+- Quoted domain and Certbot argument arrays to prevent glob expansion.
+- Replaced the check-then-create PID lock with atomic `flock` locking.
+- Corrected snap renewal timer detection and added jitter to pip-based renewal scheduling.
+- Made signal exits terminate promptly without duplicate or misleading trap diagnostics.
+
+### Changed
+- Made account email optional and installed pip-based Certbot in `/opt/certbot` to comply with PEP 668.
+- Reject wildcard domains until DNS-01 challenge support is available.
+- Bumped reported version to 1.2.0.
+
+### Documentation
+- Clarified issuance vs dry-run behavior, optional email, pip installation, renewal monitoring, and upcoming Let's Encrypt certificate lifetime reductions.
+
 ## [1.1.0] - 2025-09-07
 ### Added
 - JSON output mode (`--json`) producing a machine-readable operation summary.
