@@ -6,6 +6,15 @@ Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)
 Versioning: Semantic Versioning (https://semver.org/)
 
 ## [Unreleased]
+### Added
+- Subcommands: `lecbh issue` (the existing flow) and `lecbh version` (`--json` supported), plus a `--version` flag. Running without a command still means `issue`.
+- Bats unit tests in `tests/bats/` for core functions, flag parsing, locking, JSON structure and the CLI; run in CI.
+
+### Changed
+- Pure logic moved to `lib/core.sh`, logging to `lib/logging.sh`, and locking to `lib/lock.sh`. `lib/` must stay next to `lecbh.sh`.
+- Domain validation is stricter: labels may not start or end with a hyphen, length limits are enforced, and IP addresses are rejected.
+- `version` and `help` no longer require root.
+
 ### Fixed
 - Pip installs now symlink `/usr/bin/certbot` (as documented by Certbot), matching the path used by the renewal cron job.
 
@@ -14,7 +23,7 @@ Versioning: Semantic Versioning (https://semver.org/)
 - `test.sh` uses `docker compose` (v2), always tears down the container, and exits non-zero on failure.
 - Expected-failure tests now require a non-zero exit *and* a matching error message.
 - Added `jq`-based JSON schema tests, a lock-release test, and verification of the pip virtualenv install.
-- ShellCheck is now blocking and lints all tracked `*.sh` files. Workflows use `actions/checkout@v5` on `ubuntu-24.04`.
+- ShellCheck is now blocking and lints all tracked `*.sh`, `*.bats` and `*.bash` files (with `-x`). Workflows use `actions/checkout@v5` on `ubuntu-24.04`.
 - CI runs the full container suite (`./test.sh`).
 - Removed stale root-level `test.yml`.
 
