@@ -1,4 +1,4 @@
-[![Test Status](https://github.com/pa-ulander/lets-encrypt-certbot-helper/actions/workflows/test.yml/badge.svg?branch=main)]![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=lets-encrypt-certbot-helper)
+![Test Status](https://github.com/pa-ulander/lets-encrypt-certbot-helper/actions/workflows/test.yml/badge.svg?branch=main) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=lets-encrypt-certbot-helper)
 
 # Let's Encrypt Certbot Helper
 
