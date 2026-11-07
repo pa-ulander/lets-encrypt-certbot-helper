@@ -1,4 +1,5 @@
 /.github/*.md
 .copilot
 .vscode
-docs
+docs/*
+!docs/json-schema.md
