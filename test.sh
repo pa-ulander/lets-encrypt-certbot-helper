@@ -79,6 +79,15 @@ run_test "Multiple domains (test mode)" "/app/lecbh.sh --dry-run --unattended --
 # Test 7: JSON mode (test mode)
 run_test "JSON mode output" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com,www.example.com --json | grep 'domains'" || ((failed_tests++))
 
+# Test 7a: JSON output is clean and valid
+run_test "Valid JSON output" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com --json | python3 -c 'import json,sys; result=json.load(sys.stdin); assert result[\"version\"] == \"1.2.0\" and result[\"domains\"] == [\"example.com\"]'" || ((failed_tests++))
+
+# Test 7b: Wildcards are rejected until DNS-01 support is available
+run_test "Wildcard domain rejected" "! /app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains='*.example.com'" || ((failed_tests++))
+
+# Test 7c: Dry-run uses certonly and does not request server configuration changes
+run_test "Dry-run certbot arguments" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com 2>&1 | grep -E '\\[lecbh mock certbot\\] certonly .*--dry-run'" || ((failed_tests++))
+
 # Test 8: No redirect flag (ensure command runs)
 run_test "No redirect flag" "/app/lecbh.sh --dry-run --unattended --test-mode --no-redirect --server=apache --domains=example.com" || ((failed_tests++))
 
