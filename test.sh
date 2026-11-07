@@ -1,135 +1,169 @@
-#!/bin/bash
-# Test script for lecbh
+#!/usr/bin/env bash
+# Integration tests for lecbh, run inside a disposable Ubuntu 24.04 container.
+set -uo pipefail
 
-# Set colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${YELLOW}Starting lecbh test suite...${NC}"
+cd "$(dirname "$0")" || exit 1
 
-# Start the container
-echo -e "${YELLOW}Starting Docker container...${NC}"
-docker-compose up -d
-sleep 10 # Give container more time to start and initialize services
+if docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1 && docker-compose version 2>/dev/null | grep 'v2' >/dev/null; then
+    COMPOSE=(docker-compose)
+else
+    echo -e "${RED}Docker Compose v2 is required (docker compose).${NC}" >&2
+    exit 1
+fi
 
-# Function to run a test
-run_test() {
-    local test_name="$1"
-    local test_cmd="$2"
-    local expected_failure="$3"
+EXPECTED_VERSION=$(sed -n 's/^LECBH_VERSION="\(.*\)"$/\1/p' lib/core.sh)
+[[ -n $EXPECTED_VERSION ]] || { echo "Cannot read LECBH_VERSION from lib/core.sh" >&2; exit 1; }
 
-    echo -e "${YELLOW}Running test: ${test_name}${NC}"
-    if docker-compose exec -T lecbh-test bash -c "$test_cmd"; then
-        echo -e "${GREEN}✓ Test passed: ${test_name}${NC}"
-        return 0
+passed=0
+failed=0
+failed_names=()
+
+# shellcheck disable=SC2317,SC2329 # invoked via trap
+cleanup() {
+    echo -e "${YELLOW}Cleaning up Docker container...${NC}"
+    "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+in_container() {
+    "${COMPOSE[@]}" exec -T -e EXPECTED_VERSION="$EXPECTED_VERSION" lecbh-test \
+        bash -o pipefail -c "$1"
+}
+
+record() {
+    if [[ $1 -eq 0 ]]; then
+        echo -e "${GREEN}✓ ${2}${NC}"
+        passed=$((passed + 1))
     else
-        if [[ -n "$expected_failure" && "$expected_failure" == "true" ]]; then
-            echo -e "${YELLOW}ℹ️ Expected failure: ${test_name}${NC}"
-            return 0
-        else
-            echo -e "${RED}✗ Test failed: ${test_name}${NC}"
-            return 1
-        fi
+        echo -e "${RED}✗ ${2}${NC}"
+        failed=$((failed + 1))
+        failed_names+=("$2")
     fi
 }
 
-# Function to check if services are running in the container
-check_services() {
-    echo -e "${YELLOW}Checking if services are running in container...${NC}"
-    docker-compose exec -T lecbh-test bash -c "service apache2 status && service nginx status"
-
-    # Try to start the services if they're not running
-    docker-compose exec -T lecbh-test bash -c "service apache2 start || true"
-    docker-compose exec -T lecbh-test bash -c "service nginx start || true"
-
-    # Verify ports are accessible
-    echo -e "${YELLOW}Checking if web server ports are accessible...${NC}"
-    docker-compose exec -T lecbh-test bash -c "nc -z localhost 80 && echo 'Port 80 is accessible' || echo 'Port 80 is NOT accessible'"
-    docker-compose exec -T lecbh-test bash -c "nc -z localhost 8080 && echo 'Port 8080 is accessible' || echo 'Port 8080 is NOT accessible'"
+# expect_pass NAME CMD: CMD must exit 0.
+expect_pass() {
+    local name=$1 cmd=$2 output
+    echo -e "${YELLOW}▶ ${name}${NC}"
+    if output=$(in_container "$cmd" 2>&1); then
+        record 0 "$name"
+    else
+        echo "$output" | tail -20
+        record 1 "$name"
+    fi
 }
 
-# Run tests
-failed_tests=0
+# expect_fail NAME PATTERN CMD: CMD must exit non-zero AND its output must match PATTERN,
+# so that unrelated crashes are not mistaken for the intended validation failure.
+expect_fail() {
+    local name=$1 pattern=$2 cmd=$3 output
+    echo -e "${YELLOW}▶ ${name} (expecting failure)${NC}"
+    if output=$(in_container "$cmd" 2>&1); then
+        echo "  command unexpectedly succeeded"
+        echo "$output" | tail -20
+        record 1 "$name"
+    elif grep -qE -- "$pattern" <<<"$output"; then
+        record 0 "$name"
+    else
+        echo "  command failed, but output did not match: $pattern"
+        echo "$output" | tail -20
+        record 1 "$name"
+    fi
+}
 
-# Make sure services are running
-check_services
+echo -e "${YELLOW}Building and starting test container...${NC}"
+"${COMPOSE[@]}" up -d --build --wait || { echo -e "${RED}Container failed to start${NC}"; exit 1; }
 
-echo -e "${YELLOW}==== Running tests in test mode (mock installation) ====${NC}"
+LECBH="/app/lecbh.sh"
+MOCK="--unattended --test-mode"
 
-# Test 1: Basic help command
-run_test "Help command" "/app/lecbh.sh --help" || ((failed_tests++))
+echo -e "${YELLOW}==== Basic behaviour (mock certbot) ====${NC}"
+expect_pass "Help command" "$LECBH --help | grep 'Usage:' >/dev/null"
+expect_pass "Dry run with Apache" "$LECBH --dry-run $MOCK --server=apache"
+expect_pass "Dry run with Nginx" "$LECBH --dry-run $MOCK --server=nginx"
+expect_pass "Verbose output" "$LECBH --dry-run --verbose $MOCK --server=apache"
+expect_pass "Staging flag is forwarded" \
+    "$LECBH --dry-run --staging $MOCK --server=apache 2>&1 | grep -- '--staging' >/dev/null"
+expect_pass "Multiple domains are forwarded" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=example.com,www.example.com 2>&1 | grep -- '-d example.com -d www.example.com' >/dev/null"
+expect_pass "Dry run uses certonly with --dry-run" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=example.com 2>&1 | grep -E '\[lecbh mock certbot\] certonly .*--dry-run' >/dev/null"
+expect_pass "Omitted email is not passed to certbot" \
+    "! $LECBH --dry-run $MOCK --server=apache --domains=example.com 2>&1 | grep -- '--email' >/dev/null"
 
-# Test 2: Dry run with Apache (test mode)
-run_test "Dry run with Apache (test mode)" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache" || ((failed_tests++))
+echo -e "${YELLOW}==== Commands ====${NC}"
+expect_pass "version prints the semver" "[ \"\$($LECBH version)\" = \"\$EXPECTED_VERSION\" ]"
+expect_pass "--version matches version" "[ \"\$($LECBH --version)\" = \"\$EXPECTED_VERSION\" ]"
+expect_pass "version --json" \
+    "$LECBH version --json | jq -e --arg v \"\$EXPECTED_VERSION\" '. == {version: \$v}' >/dev/null"
+expect_pass "Explicit issue command" "$LECBH issue --dry-run $MOCK --server=apache --domains=example.com"
+expect_fail "Unknown command is rejected" "Unknown command: frobnicate" "$LECBH frobnicate"
 
-# Test 3: Dry run with Nginx (test mode)
-run_test "Dry run with Nginx (test mode)" "/app/lecbh.sh --dry-run --unattended --test-mode --server=nginx" || ((failed_tests++))
+echo -e "${YELLOW}==== JSON output ====${NC}"
+expect_pass "JSON output is valid and matches schema" "
+    $LECBH --dry-run $MOCK --server=apache --domains=example.com,www.example.com --email=ops@example.org --json 2>/dev/null |
+    jq -e --arg v \"\$EXPECTED_VERSION\" '
+        (keys == ([\"domains\",\"dry_run\",\"email\",\"install_method\",\"redirect\",\"server\",\"staging\",\"test_mode\",\"timestamp\",\"version\"] | sort))
+        and .domains == [\"example.com\",\"www.example.com\"]
+        and .email == \"ops@example.org\"
+        and .server == \"apache\"
+        and .install_method == \"snap\"
+        and .dry_run == true and .staging == false and .test_mode == true and .redirect == true
+        and (.timestamp | test(\"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$\"))
+        and .version == \$v
+    ' >/dev/null"
+expect_pass "JSON reflects --no-redirect, --staging and nginx" "
+    $LECBH --dry-run --staging --no-redirect $MOCK --server=nginx --domains=example.com --json 2>/dev/null |
+    jq -e '.redirect == false and .staging == true and .server == \"nginx\" and .email == \"\"' >/dev/null"
+expect_pass "JSON stdout is empty on failure" "
+    out=\$($LECBH $MOCK --domains=bad_domain --json 2>/dev/null); rc=\$?; [ \$rc -ne 0 ] && [ -z \"\$out\" ]"
 
-# Test 4: Verbose output (test mode)
-run_test "Verbose output (test mode)" "/app/lecbh.sh --dry-run --verbose --unattended --test-mode --server=apache" || ((failed_tests++))
+echo -e "${YELLOW}==== Input validation ====${NC}"
+expect_fail "Invalid domain is rejected" "Invalid domain: bad_domain" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=bad_domain"
+expect_fail "IP address is rejected as a domain" "Invalid domain: 192.0.2.1" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=192.0.2.1"
+expect_fail "Invalid email is rejected" "Invalid email: not-an-email" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=example.com --email=not-an-email"
+expect_fail "Wildcard domain is rejected" "require DNS-01" \
+    "$LECBH --dry-run $MOCK --server=apache --domains='*.example.com'"
+expect_fail "Unknown server is rejected" "Unsupported server: caddy" \
+    "$LECBH --dry-run $MOCK --server=caddy --domains=example.com"
+expect_fail "Unknown option is rejected" "Unknown option: --bogus" \
+    "$LECBH --bogus"
 
-# Test 5: Staging environment (test mode)
-run_test "Staging environment (test mode)" "/app/lecbh.sh --dry-run --staging --unattended --test-mode --server=apache" || ((failed_tests++))
+echo -e "${YELLOW}==== Concurrency lock ====${NC}"
+expect_pass "Second concurrent run is refused" "
+    LECBH_SLEEP_BEFORE_EXIT=3 $LECBH --dry-run $MOCK --server=apache --domains=example.com >/tmp/first.log 2>&1 &
+    first=\$!
+    sleep 1
+    if $LECBH --dry-run $MOCK --server=apache --domains=example.com >/tmp/second.log 2>&1; then exit 1; fi
+    grep -q 'Another lecbh instance is running' /tmp/second.log && wait \$first"
+expect_pass "Lock is released after exit" \
+    "$LECBH --dry-run $MOCK --server=apache --domains=example.com"
 
-# Test 6: Multiple domains (test mode)
-run_test "Multiple domains (test mode)" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com,www.example.com" || ((failed_tests++))
+echo -e "${YELLOW}==== Installer paths ====${NC}"
+# Must run before the pip install below, which places a real certbot on PATH.
+expect_fail "Snap install fails cleanly without snapd" "snap command not found" \
+    "$LECBH --dry-run --unattended --snap --server=apache --domains=example.com"
+expect_pass "Pip installs certbot into /opt/certbot venv" "
+    LECBH_TEST_INSTALL=1 $LECBH --dry-run --staging $MOCK --pip --server=nginx --domains=example.com &&
+    /opt/certbot/bin/certbot --version &&
+    [ \"\$(readlink -f /usr/bin/certbot)\" = \"\$(readlink -f /opt/certbot/bin/certbot)\" ] &&
+    /opt/certbot/bin/certbot plugins --text 2>/dev/null | grep '^\* nginx' >/dev/null"
 
-# Test 7: JSON mode (test mode)
-run_test "JSON mode output" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com,www.example.com --json | grep 'domains'" || ((failed_tests++))
-
-# Test 8: No redirect flag (ensure command runs)
-run_test "No redirect flag" "/app/lecbh.sh --dry-run --unattended --test-mode --no-redirect --server=apache --domains=example.com" || ((failed_tests++))
-
-# Test 9: Quiet + JSON (should still output JSON containing version)
-run_test "Quiet JSON mode" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com --json | grep 'version'" || ((failed_tests++))
-
-# Test 10: Invalid domain (expect failure)
-run_test "Invalid domain" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=bad_domain --json" true || ((failed_tests++))
-
-# Test 11: Invalid email (expect failure)
-run_test "Invalid email" "/app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com --email=not-an-email --json" true || ((failed_tests++))
-
-# Test 12: Concurrency lock (second run should fail while first holds lock)
-run_test "Concurrency lock" "( LECBH_SLEEP_BEFORE_EXIT=3 /app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com & sleep 1; /app/lecbh.sh --dry-run --unattended --test-mode --server=apache --domains=example.com && exit 1 || exit 0 )" || ((failed_tests++))
-
-echo -e "${YELLOW}==== Running tests with pip installation method ====${NC}"
-
-# Install Python and pip in the container if they aren't already
-run_test "Install pip dependencies" "apt-get update && apt-get install -y python3-pip" || ((failed_tests++))
-
-# Test 13: Pip installation (dry run)
-run_test "Pip installation (dry run)" "LECBH_TEST_INSTALL=1 /app/lecbh.sh --dry-run --staging --unattended --pip --test-mode --server=apache --domains=lecbhtest12345.com" || ((failed_tests++))
-
-# Test 14: Pip installation with Nginx (dry run)
-run_test "Pip with Nginx (dry run)" "LECBH_TEST_INSTALL=1 /app/lecbh.sh --dry-run --staging --unattended --pip --test-mode --server=nginx --domains=lecbhtest12345.com" || ((failed_tests++))
-
-# Test 15: Pip installation with staging (dry run)
-run_test "Pip with staging (dry run)" "LECBH_TEST_INSTALL=1 /app/lecbh.sh --dry-run --staging --unattended --pip --test-mode --server=apache --domains=lecbhtest12345.com" || ((failed_tests++))
-
-echo -e "${YELLOW}==== Running tests with snap installation method ====${NC}"
-echo -e "${YELLOW}Note: Snap tests may fail in standard Docker containers${NC}"
-echo -e "${YELLOW}The following tests are expected to pass in a real Ubuntu environment${NC}"
-
-# Test 16: Attempt snap installation (expected to fail in Docker)
-run_test "Snap installation attempt (dry run)" "/app/lecbh.sh --dry-run --unattended --snap --server=apache" "true" || ((failed_tests++))
-echo -e "${YELLOW}ℹ️ Snap installation test is expected to fail in standard Docker container.${NC}"
-echo -e "${YELLOW}ℹ️ This would work in a real Ubuntu environment or Docker with systemd support.${NC}"
-
-# Test 17: Snap with test mode (should pass)
-run_test "Snap with test mode (mock installation)" "/app/lecbh.sh --dry-run --unattended --snap --test-mode --server=apache" || ((failed_tests++))
-
-# Clean up
-echo -e "${YELLOW}Cleaning up Docker container...${NC}"
-docker-compose down
-
-# Report results
-echo -e "${YELLOW}Test summary:${NC}"
-if [ $failed_tests -eq 0 ]; then
+echo
+echo -e "${YELLOW}Test summary: ${passed} passed, ${failed} failed${NC}"
+if [[ $failed -eq 0 ]]; then
     echo -e "${GREEN}All tests passed!${NC}"
     exit 0
-else
-    echo -e "${RED}${failed_tests} test(s) failed.${NC}"
-    exit 1
 fi
+printf "${RED}  - %s${NC}\n" "${failed_names[@]}"
+exit 1

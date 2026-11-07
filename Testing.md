@@ -1,204 +1,89 @@
-# Testing Let's Encrypt Certbot Helper (lecbh) with Docker
+# Testing Let's Encrypt Certbot Helper (lecbh)
 
-This document explains how to set up a testing environment for the `lecbh` script using Docker, which allows you to safely test the script without affecting your production systems.
+lecbh is tested inside a disposable Ubuntu 24.04 container running Apache (port 80) and Nginx (port 8080). Certbot is replaced by a mock in `--test-mode`, so no certificates are requested from Let's Encrypt.
 
 ## Prerequisites
 
-*   Docker installed on your system
-*   Docker Compose installed on your system
-*   Basic knowledge of Docker and bash scripting
+*   Docker with the Compose v2 plugin (`docker compose`). The standalone v2 `docker-compose` binary is used as a fallback.
+*   [Bats](https://github.com/bats-core/bats-core) and `jq` for unit tests (`sudo apt-get install bats jq` on Ubuntu 24.04).
+*   [ShellCheck](https://www.shellcheck.net/) for linting (optional locally, enforced in CI).
 
-## Testing Environment Setup
+The container needs no privileged mode, systemd, or host port mappings.
 
-### Building the Docker container
-
-The project includes a Dockerfile and docker-compose.yml file for testing. To build the testing environment:
+## Unit Tests (Bats)
 
 ```
-# Build the Docker container
-docker-compose build
+bats tests/bats
 ```
 
-This will create a container with Ubuntu 22.04, Apache, Nginx, and all necessary dependencies for testing the lecbh script.
+No root, Docker, or network is needed. The tests cover the pure functions in `lib/core.sh` (validation, domain splitting, Certbot arguments, JSON escaping, exact JSON key order), flag parsing, `flock` lock acquisition, and the CLI dispatcher (`version`, `--version`, `version --json`, `help`, unknown commands, root requirement for `issue`, symlinked invocation, missing `lib/`). Run them as a non-root user too: the root-requirement test is skipped when run as root.
 
-Make the test script executable:
+Use the `refute` helper from `tests/bats/test_helper.bash` to assert failure; a bare `! cmd` does not fail a Bats test unless it is the last command.
 
-```
-chmod +x test.sh
-```
-
-## Running the Tests
-
-To run all tests, simply execute the test script:
+## Integration Tests
 
 ```
 ./test.sh
 ```
 
-This will:
+This builds the image, waits for Apache and Nginx to become healthy, runs the suite, prints a summary, and removes the container (also on failure or Ctrl-C). The script exits non-zero if any test fails.
 
-1.  Start a Docker container with Ubuntu, Apache, and Nginx
-2.  Run a series of tests with different configurations
-3.  Report the results
-4.  Clean up the container
+Lint the scripts:
 
-The test script covers:
+```
+shellcheck -x lecbh.sh lib/*.sh test.sh tests/bats/*.bats tests/bats/*.bash
+```
 
-*   Help command
-*   Dry run (Apache & Nginx) using explicit `--server=` flag
-*   Verbose mode
-*   Staging mode
-*   Multiple domains via `--domains`
-*   Pip & snap installation selectors
-*   Test mode (mock certbot)
-*   JSON output mode (can be added with `--json`)
+The `cleanup` function in `test.sh` is invoked indirectly by an `EXIT` trap. Its function-scoped ShellCheck directive suppresses SC2317 (unreachable commands in ShellCheck 0.9.0) and SC2329 (an apparently unused function), without disabling these checks elsewhere.
+
+### Test semantics
+
+*   `expect_pass NAME CMD` passes only if `CMD` exits 0.
+*   `expect_fail NAME PATTERN CMD` passes only if `CMD` exits non-zero **and** its output matches `PATTERN`. An unrelated crash does not count as the expected failure.
+*   Commands run with `bash -o pipefail`. Use `grep … >/dev/null` instead of `grep -q` after a pipe: `grep -q` exits early and the upstream command's SIGPIPE would fail the pipeline.
+
+### Coverage
+
+*   Help output, `version`/`--version`/`version --json`, explicit `issue` command, unknown commands
+*   Apache/Nginx dry runs, verbose mode
+*   Forwarding of `--staging`, multiple domains, `certonly --dry-run`, and omission of `--email` when none is set
+*   `--json`: valid JSON, exact key set, field types/values, `--no-redirect`/`--staging`/server reflected, and empty stdout on failure (validated with `jq`)
+*   Rejection of invalid domains (including IP addresses), invalid emails, wildcard domains, unknown servers, and unknown options
+*   `flock` concurrency lock: a second concurrent run is refused, and the lock is released afterwards
+*   Snap path failing cleanly when snapd is absent
+*   Pip path installing Certbot and the Nginx plugin into the `/opt/certbot` virtualenv with a `/usr/bin/certbot` symlink (requires network access to PyPI)
 
 ## Manual Testing
 
-You can also manually test the script in the Docker container:
-
-### 1\. Start the container
-
 ```
-docker-compose up -d
-```
+docker compose up -d --build --wait
+docker compose exec lecbh-test bash
 
-### 2\. Access the container shell
-
-```
-docker-compose exec lecbh-test bash
-```
-
-### 3\. Run the script with different options
-
-```
 ./lecbh.sh --help
-./lecbh.sh --dry-run --server=apache
-./lecbh.sh --dry-run --verbose --server=nginx
-./lecbh.sh --staging --unattended --server=apache
-./lecbh.sh --test-mode --pip --dry-run --server=nginx
-./lecbh.sh --dry-run --json --unattended --domains=example.com,www.example.com
+./lecbh.sh version --json
+./lecbh.sh --dry-run --unattended --test-mode --server=apache
+./lecbh.sh --dry-run --unattended --test-mode --server=nginx --verbose
+./lecbh.sh --dry-run --unattended --test-mode --domains=example.com,www.example.com --json | jq .
+
+exit
+docker compose down
 ```
 
-### 4\. Clean up when done
+`lecbh.sh` and `lib/` are bind-mounted read-only into the container, so edits on the host take effect without rebuilding.
 
-```
-exit  # Exit the container shell
-docker-compose down
-```
+## Continuous Integration
 
-## Testing with Different Ubuntu Versions
+GitHub Actions workflows in `.github/workflows/`:
 
-To test with different Ubuntu versions, modify the first line of the Dockerfile:
-
-```
-# For Ubuntu 20.04
-FROM ubuntu:20.04
-
-# For Ubuntu 22.04 (current default)
-FROM ubuntu:22.04
-```
-
-Then rebuild the container:
-
-```
-docker-compose build
-```
-
-## Testing with GitHub Actions
-
-The project includes a GitHub Actions workflow configuration in `.github/workflows/test.yml` that automatically tests the script when changes are pushed to the repository.
-
-The workflow:
-
-1.  Installs Apache & Nginx
-2.  Creates a temporary host-mapped test domain
-3.  Runs lecbh in mock (`--test-mode`) dry-run for Apache, then Nginx
-4.  Verifies exit codes
-
-To see the test results, visit the Actions tab in the GitHub repository.
-
-### Local testing of GitHub Actions
-
-You can test similar configurations locally using:
-
-```
-# For Apache testing
-sudo ./lecbh.sh --dry-run --unattended --verbose
-
-# For Nginx testing
-sudo ./lecbh.sh --dry-run --unattended --verbose --server=nginx
-```
+*   `test.yml` runs the Bats unit tests and `./test.sh` as separate jobs on `ubuntu-24.04`.
+*   `shellcheck.yml` lints every tracked `*.sh`, `*.bats` and `*.bash` file with `shellcheck -x`. Any finding fails the build.
 
 ## Troubleshooting
 
-### Common Issues
+**Container never becomes healthy**: run `docker compose logs`. Apache must listen on port 80 and Nginx on 8080 inside the container.
 
-**Systemd not starting in container**:
+**Pip test fails**: the pip installer path downloads Certbot from PyPI. Check network access from Docker.
 
-*   Ensure you're using the `privileged: true` flag in docker-compose.yml or the `SYS_ADMIN` capability
-*   The current configuration uses `service` commands instead of systemd for compatibility
+**Snap**: snapd does not work in standard containers. The suite only verifies that the snap path fails with a clear message. Test real snap installs on a VM.
 
-**Port conflicts**:
-
-*   If ports 80 or 443 are already in use on your host, modify the port mappings in docker-compose.yml
-*   The Nginx configuration is modified to use port 8080 to avoid conflicts with Apache
-
-**Snap not working in container**:
-
-*   Snap has limitations in many container runtimes
-*   Prefer `--test-mode` or `--pip` inside ephemeral containers
-
-**DNS resolution issues**:
-
-*   The container may have different DNS settings than your host
-*   For GitHub Actions testing, domains are added to the hosts file
-
-### Debugging
-
-For more detailed debugging, add the `--verbose` flag to your lecbh.sh commands and inspect the logs:
-
-```
-docker-compose logs
-```
-
-To run a specific test from the test script:
-
-```
-docker-compose exec -T lecbh-test /app/lecbh.sh --dry-run --unattended --test-mode
-```
-
-## Advanced Testing Scenarios
-
-### Testing with Real Domains
-
-To test with real domains, you'll need to:
-
-1.  Ensure your domain's DNS points to the IP where you're running Docker
-2.  Forward ports 80 and 443 to your Docker host
-3.  Run the script without the `--dry-run` flag (be cautious with rate limits)
-
-### Testing Certificate Renewal
-
-To test certificate renewal without waiting for the actual renewal period:
-
-```
-docker-compose exec lecbh-test certbot renew --dry-run
-```
-
-### Testing with Custom Configurations
-
-You can create different test configurations by modifying the environment variables:
-
-```
-docker-compose exec -e DEFAULT_EMAIL=custom@example.com -e DEFAULT_DOMAINS=custom.example.com lecbh-test /app/lecbh.sh --dry-run --unattended
-```
-
-### Running a Specific Set of Tests
-
-You can modify the test script to run only specific tests by commenting out unwanted test sections, or call specific tests directly:
-
-```
-# Run only the pip installation test
-docker-compose exec -T lecbh-test bash -c "/app/lecbh.sh --dry-run --unattended --pip"
-```
+**Testing with real domains**: run on a server whose public DNS points to it, without `--test-mode`, and use `--staging` first to avoid rate limits.

@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)  
 Versioning: Semantic Versioning (https://semver.org/)
 
+## [Unreleased]
+### Added
+- Subcommands: `lecbh issue` (the existing flow) and `lecbh version` (`--json` supported), plus a `--version` flag. Running without a command still means `issue`.
+- Bats unit tests in `tests/bats/` for core functions, flag parsing, locking, JSON structure and the CLI; run in CI.
+
+### Changed
+- Pure logic moved to `lib/core.sh`, logging to `lib/logging.sh`, and locking to `lib/lock.sh`. `lib/` must stay next to `lecbh.sh`.
+- Domain validation is stricter: labels may not start or end with a hyphen, length limits are enforced, and IP addresses are rejected.
+- `version` and `help` no longer require root.
+
+### Documentation
+- README renewal section covers the 2027/2028 lifetime changes, revalidation on renewal, ARI, and certificate profiles.
+- Added contributor guidance, issue and pull request templates, a Code of Conduct, maintainer ownership, and a private vulnerability reporting policy.
+
+### Changed
+- Changed the project license from Unlicense to MIT. Previously distributed versions remain under their original license.
+
+### Fixed
+- Pip installs now symlink `/usr/bin/certbot` (as documented by Certbot), matching the path used by the renewal cron job.
+
+### CI / Internal
+- Test container moved to Ubuntu 24.04 without privileged mode, systemd, or host port mappings. A healthcheck gates test start.
+- `test.sh` uses `docker compose` (v2), always tears down the container, and exits non-zero on failure.
+- Expected-failure tests now require a non-zero exit *and* a matching error message.
+- Added `jq`-based JSON schema tests, a lock-release test, and verification of the pip virtualenv install.
+- ShellCheck is now blocking and lints all tracked `*.sh`, `*.bats` and `*.bash` files (with `-x`). Workflows use `actions/checkout@v5` on `ubuntu-24.04`.
+- CI runs the full container suite (`./test.sh`).
+- Removed stale root-level `test.yml`.
+
+## [1.2.0] - 2026-11-07
+### Fixed
+- Real issuance now uses Certbot's Apache/Nginx installer, while dry-runs remain `certonly` and do not modify server configuration.
+- Kept JSON output parseable by sending Certbot output to stderr and quoting validated JSON string values.
+- Quoted domain and Certbot argument arrays to prevent glob expansion.
+- Replaced the check-then-create PID lock with atomic `flock` locking.
+- Corrected snap renewal timer detection and added jitter to pip-based renewal scheduling.
+- Made signal exits terminate promptly without duplicate or misleading trap diagnostics.
+
+### Changed
+- Made account email optional and installed pip-based Certbot in `/opt/certbot` to comply with PEP 668.
+- Reject wildcard domains until DNS-01 challenge support is available.
+- Bumped reported version to 1.2.0.
+
+### Documentation
+- Clarified issuance vs dry-run behavior, optional email, pip installation, renewal monitoring, and upcoming Let's Encrypt certificate lifetime reductions.
+
 ## [1.1.0] - 2025-09-07
 ### Added
 - JSON output mode (`--json`) producing a machine-readable operation summary.
@@ -54,7 +100,7 @@ Versioning: Semantic Versioning (https://semver.org/)
 - No breaking changes; previous invocation patterns continue to work.
 - Recommend switching from editing defaults in the script to env/flag overrides for automation.
 
-[1.1.0]: https://github.com/pa-ulander/lecbh/compare/v1.0.0...v1.1.0
+[1.1.0]: https://github.com/pa-ulander/lets-encrypt-certbot-helper/compare/v1.0.0...v1.1.0
 
 
 ## [1.0.0] - 2025-09-06
@@ -85,4 +131,4 @@ Versioning: Semantic Versioning (https://semver.org/)
 - `README.md` (feature overview, usage, troubleshooting)
 - `UNLICENSE` (public domain dedication)
 
-[1.0.0]: https://github.com/pa-ulander/lecbh/releases/tag/v1.0.0
+[1.0.0]: https://github.com/pa-ulander/lets-encrypt-certbot-helper/releases/tag/v1.0.0
