@@ -8,7 +8,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bats
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Run Bats unit tests
+        run: bats tests/bats
+
+  integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
