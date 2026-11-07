@@ -4,3 +4,4 @@ services:
     init: true
     volumes:
       - ./lecbh.sh:/app/lecbh.sh:ro
+      - ./lib:/app/lib:ro
