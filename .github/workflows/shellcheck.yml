@@ -15,4 +15,4 @@ jobs:
       - name: Lint shell scripts
         run: |
           shellcheck --version
-          git ls-files -z '*.sh' | xargs -0 shellcheck
+          git ls-files -z '*.sh' '*.bats' '*.bash' | xargs -0 shellcheck -x
