@@ -23,8 +23,8 @@
   - [Troubleshooting](#troubleshooting)
     - [Common Issues](#common-issues)
     - [Logs](#logs)
-    - [Contributing](#contributing)
-  - [Unlicense](#unlicense)
+  - [Contributing](#contributing)
+  - [License](#license)
   - [Acknowledgments](#acknowledgments)
 
 ## Features
@@ -266,12 +266,13 @@ Certbot logs can be found at:
 
 *   `/var/log/letsencrypt/letsencrypt.log`
 
-### Contributing
-If you find any problems or have suggestions about this script, please submit an issue. Moreover, any pull request, code review and feedback are welcome.
+## Contributing
 
-## Unlicense
+Issues, pull requests, code reviews, and feedback are welcome. See the [contributing guide](CONTRIBUTING.md) for the development workflow and project conventions.
 
-This project is licensed under the UNLICENSE License - see the UNLICENSE file for details.
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
