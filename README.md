@@ -210,10 +210,12 @@ The script uses `flock` on a lock file (`/var/run/lecbh.lock` by default) to pre
 
 The account email is optional. Since June 2025, Let's Encrypt no longer sends expiration notification emails; renewal monitoring must be configured separately.
 
-Let's Encrypt certificate lifetimes are being shortened: 64 days from February 2027, then 45 days from February 2028. Keep automatic renewal operational and monitor it independently:
+Let's Encrypt certificate lifetimes are being shortened. The default (`classic`) profile issues 90-day certificates today, 64-day certificates from February 10, 2027, and 45-day certificates from February 16, 2028. Authorization reuse shrinks at the same time, so most renewals will revalidate your domains: port 80 must stay reachable for every renewal, not just the first issuance. Keep automatic renewal operational and monitor it independently:
 
 *   With snap installation: Certbot's snap provides a systemd timer for automatic renewal.
 *   With pip installation: lecbh installs a cron job every 12 hours with a randomized delay.
+*   Certbot 4.1+ checks ACME Renewal Info (ARI) during `certbot renew` and renews when Let's Encrypt suggests, typically at about two thirds of the lifetime, or earlier if the CA asks (for example, before a mass revocation). Snap installs update automatically; for pip installs, upgrade with `sudo /opt/certbot/bin/pip install --upgrade certbot certbot-apache` (or `certbot-nginx`). Do not rely on a fixed "renew 30 days before expiry" rule.
+*   Let's Encrypt also offers opt-in [certificate profiles](https://letsencrypt.org/docs/profiles/), such as `tlsserver` (45 days now). lecbh does not select a profile yet (planned for M3); it uses the CA default.
 *   On successful issuance, the selected Apache/Nginx plugin installs the certificate. `--dry-run` exercises issuance only and does not change web-server configuration.
 
 You can test the renewal process with:
