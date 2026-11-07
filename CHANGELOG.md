@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)  
 Versioning: Semantic Versioning (https://semver.org/)
 
-## [Unreleased]
+## [1.2.0] - 2026-11-07
 ### Added
 - Subcommands: `lecbh issue` (the existing flow) and `lecbh version` (`--json` supported), plus a `--version` flag. Running without a command still means `issue`.
 - Bats unit tests in `tests/bats/` for core functions, flag parsing, locking, JSON structure and the CLI; run in CI.
